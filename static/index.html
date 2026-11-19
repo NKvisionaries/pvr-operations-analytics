@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PVR Cinema Operations &amp; Staff Analytics</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    :root { --bg: #0f172a; --card: #1e293b; --border: #334155; --text: #f8fafc; --muted: #94a3b8; --accent: #f59e0b; --green: #10b981; }
+    * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { margin: 0; background: var(--bg); color: var(--text); padding: 24px; }
+    .container { max-width: 1240px; margin: 0 auto; }
+    header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 24px; }
+    h1 { margin: 0; font-size: 1.5rem; color: var(--accent); }
+    .sub { color: var(--muted); font-size: 0.9rem; margin-top: 4px; }
+    .filters { display: flex; gap: 10px; align-items: center; }
+    select, input, button { background: var(--card); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 0.9rem; }
+    button { background: var(--accent); color: #0f172a; font-weight: 600; cursor: pointer; border: none; }
+    button.secondary { background: #334155; color: var(--text); }
+    .grid-kpi { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+    .kpi-label { color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
+    .kpi-val { font-size: 1.7rem; font-weight: 700; margin-top: 6px; }
+    .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 20px; margin-bottom: 24px; }
+    h2 { font-size: 1.05rem; margin: 0 0 14px; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 600; }
+    .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-bottom: 12px; }
+    .status { font-size: 0.85rem; color: var(--green); margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <h1>PVR Cinema Operations &amp; Staff Analytics</h1>
+        <div class="sub">Seat Occupancy Optimization, QA Audits &amp; Shift Performance Dashboard</div>
+      </div>
+      <div class="filters">
+        <select id="cinemaFilter" onchange="loadDashboard()"><option value="">All Cinemas</option></select>
+        <select id="slotFilter" onchange="loadDashboard()">
+          <option value="">All Show Slots</option>
+          <option value="Morning">Morning</option>
+          <option value="Matinee">Matinee</option>
+          <option value="Evening">Evening</option>
+          <option value="Night">Night</option>
+        </select>
+        <button class="secondary" onclick="window.location='/api/template'">Download CSV Template</button>
+      </div>
+    </header>
+
+    <div class="grid-kpi" id="kpis"></div>
+
+    <div class="grid-2">
+      <div class="card"><h2>Occupancy % by Show Slot (Peak Timing)</h2><canvas id="slotChart"></canvas></div>
+      <div class="card"><h2>Occupancy % &amp; Ad Compliance by Cinema</h2><canvas id="cinemaChart"></canvas></div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <h2>Insert New Show / QA Record</h2>
+        <form id="addShowForm" onsubmit="submitShow(event)">
+          <div class="form-grid">
+            <input name="show_date" type="date" required />
+            <input name="cinema_name" placeholder="Cinema (e.g. PVR Priya)" required />
+            <input name="movie_title" placeholder="Movie Title" required />
+            <select name="show_slot"><option>Morning</option><option>Matinee</option><option selected>Evening</option><option>Night</option></select>
+            <input name="total_seats" type="number" placeholder="Total Seats" value="250" required />
+            <input name="booked_seats" type="number" placeholder="Booked Seats" value="210" required />
+            <input name="av_quality_score" type="number" step="0.1" placeholder="AV Score (0-100)" value="96.5" />
+            <input name="staff_name" placeholder="Shift Lead Name" value="Rohan Sharma" />
+          </div>
+          <button type="submit">Save to SQLite DB</button>
+        </form>
+        <div id="formStatus" class="status"></div>
+      </div>
+
+      <div class="card">
+        <h2>Bulk Upload Custom CSV Data</h2>
+        <p class="sub">Upload any CSV matching the template columns to insert records into SQLite.</p>
+        <input type="file" id="csvFile" accept=".csv" />
+        <button style="margin-left:8px" onclick="uploadCsv()">Import CSV</button>
+        <div id="csvStatus" class="status"></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:24px;">
+      <h2>Staff Performance &amp; Shift Audits</h2>
+      <table><thead><tr><th>Staff</th><th>Role</th><th>Cinema</th><th>Shift</th><th>Attendance %</th><th>Audit Score</th><th>Shows</th></tr></thead><tbody id="staffBody"></tbody></table>
+    </div>
+
+    <div class="card">
+      <h2>Recent Show Audits &amp; Occupancy</h2>
+      <table><thead><tr><th>Date</th><th>Cinema</th><th>Movie</th><th>Slot</th><th>Booked / Total</th><th>Occupancy</th><th>Ad QA</th><th>Rating</th></tr></thead><tbody id="showsBody"></tbody></table>
+    </div>
+  </div>
+
+  <script>
+    let slotChart, cinemaChart;
+    async function loadDashboard() {
+      const c = document.getElementById('cinemaFilter').value;
+      const s = document.getElementById('slotFilter').value;
+      const res = await fetch(`/api/dashboard?cinema=${encodeURIComponent(c)}&slot=${encodeURIComponent(s)}`);
+      const data = await res.json();
+
+      const sel = document.getElementById('cinemaFilter');
+      if (sel.options.length === 1) {
+        data.cinemas.forEach(name => { const o = document.createElement('option'); o.value = name; o.textContent = name; sel.appendChild(o); });
+      }
+
+      const k = data.kpis;
+      document.getElementById('kpis').innerHTML = `
+        <div class="card"><div class="kpi-label">Total Shows Audited</div><div class="kpi-val">${k.total_shows || 0}</div></div>
+        <div class="card"><div class="kpi-label">Avg Seat Occupancy</div><div class="kpi-val" style="color:#f59e0b">${k.avg_occupancy_pct || 0}%</div></div>
+        <div class="card"><div class="kpi-label">Ad Placement QA</div><div class="kpi-val" style="color:#10b981">${k.ad_compliance_pct || 0}%</div></div>
+        <div class="card"><div class="kpi-label">Avg AV Quality</div><div class="kpi-val">${k.avg_av_quality || 0}</div></div>
+        <div class="card"><div class="kpi-label">Customer Rating</div><div class="kpi-val">${k.avg_rating || 0} / 5</div></div>
+      `;
+
+      if (slotChart) slotChart.destroy();
+      slotChart = new Chart(document.getElementById('slotChart'), {
+        type: 'bar',
+        data: { labels: data.slot_breakdown.map(x => x.show_slot), datasets: [{ label: 'Occupancy %', data: data.slot_breakdown.map(x => x.occupancy_pct), backgroundColor: '#f59e0b' }] },
+        options: { scales: { y: { beginAtZero: true, max: 100 } } }
+      });
+
+      if (cinemaChart) cinemaChart.destroy();
+      cinemaChart = new Chart(document.getElementById('cinemaChart'), {
+        type: 'bar',
+        data: {
+          labels: data.cinema_breakdown.map(x => x.cinema_name),
+          datasets: [
+            { label: 'Occupancy %', data: data.cinema_breakdown.map(x => x.occupancy_pct), backgroundColor: '#38bdf8' },
+            { label: 'Ad QA %', data: data.cinema_breakdown.map(x => x.ad_compliance_pct), backgroundColor: '#10b981' }
+          ]
+        },
+        options: { scales: { y: { beginAtZero: true, max: 100 } } }
+      });
+
+      document.getElementById('staffBody').innerHTML = data.staff_performance.map(r => `
+        <tr><td>${r.staff_name}</td><td>${r.role}</td><td>${r.cinema_name}</td><td>${r.shift_type}</td><td>${r.attendance_rate}%</td><td>${r.audit_score}</td><td>${r.shows_managed}</td></tr>
+      `).join('');
+
+      document.getElementById('showsBody').innerHTML = data.recent_shows.map(r => `
+        <tr><td>${r.show_date}</td><td>${r.cinema_name}</td><td>${r.movie_title}</td><td>${r.show_slot}</td><td>${r.booked_seats}/${r.total_seats}</td><td>${r.occupancy_pct}%</td><td>${r.ad_placement_verified ? 'Pass' : 'Flag'}</td><td>${r.customer_rating}</td></tr>
+      `).join('');
+    }
+
+    async function submitShow(e) {
+      e.preventDefault();
+      const payload = Object.fromEntries(new FormData(e.target).entries());
+      const res = await fetch('/api/shows', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const out = await res.json();
+      document.getElementById('formStatus').textContent = out.message || 'Saved!';
+      loadDashboard();
+    }
+
+    async function uploadCsv() {
+      const file = document.getElementById('csvFile').files[0];
+      if (!file) return;
+      const text = await file.text();
+      const res = await fetch('/api/upload-csv', { method: 'POST', headers: { 'Content-Type': 'text/csv' }, body: text });
+      const out = await res.json();
+      document.getElementById('csvStatus').textContent = `Imported ${out.inserted} rows into SQLite!`;
+      loadDashboard();
+    }
+
+    loadDashboard();
+  </script>
+</body>
+</html>
